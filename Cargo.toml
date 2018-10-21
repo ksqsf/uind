@@ -1,0 +1,7 @@
+[package]
+name = "dns"
+version = "0.1.0"
+authors = ["_rika <i@ksqsf.moe>"]
+edition = "2018"
+
+[dependencies]
