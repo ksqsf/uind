@@ -1,7 +1,10 @@
 [package]
-name = "dns"
+name = "uind"
 version = "0.1.0"
-authors = ["_rika <i@ksqsf.moe>"]
+authors = ["Kai Ma <ksqsf@mail.ustc.edu.cn>"]
 edition = "2018"
 
 [dependencies]
+tokio = "0.1.13"
+failure = "0.1.3"
+futures = "0.1.25"
