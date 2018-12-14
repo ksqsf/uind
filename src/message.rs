@@ -15,7 +15,7 @@ pub struct DnsHeader {
     pub query: bool,
     pub opcode: DnsOpcode,
     pub authoritative: bool,
-    pub truncation: bool,
+    pub truncated: bool,
     pub recur_desired: bool,
     pub recur_available: bool,
     pub reserved: u8,

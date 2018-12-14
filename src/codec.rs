@@ -1,5 +1,5 @@
 use tokio::codec::{Decoder, Encoder};
-use bytes::BytesMut;
+use bytes::{BytesMut, BufMut};
 use std::io::{Error, ErrorKind};
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -51,7 +51,7 @@ impl Decoder for DnsMessageCodec {
                 }
             },
             authoritative: aa == 1,
-            truncation: tc == 1,
+            truncated: tc == 1,
             recur_desired: rd == 1,
             recur_available: ra == 1,
             reserved: z,
@@ -213,12 +213,79 @@ impl DnsMessageCodec {
     }
 }
 
-
 impl Encoder for DnsMessageCodec {
     type Item = DnsMessage;
     type Error = std::io::Error;
 
-    fn encode(&mut self, item: DnsMessage, src: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+    fn encode(&mut self, item: DnsMessage, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        self.encode_header(&item.header, buf)?;
+        for question in item.question {
+            self.encode_name(&question.qname, buf)?;
+            buf.put_u16_be(question.qtype as u16);
+            buf.put_u16_be(question.qclass as u16);
+        }
+        for answer in item.answer {
+            self.encode_rr(&answer, buf)?;
+        }
+        for authority in item.authority {
+            self.encode_rr(&authority, buf)?;
+        }
+        for additional in item.additional {
+            self.encode_rr(&additional, buf)?;
+        }
+        Ok(())
+    }
+}
+
+impl DnsMessageCodec {
+    fn encode_header(&mut self, header: &DnsHeader, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        buf.put_u16_be(header.id);
+        buf.put_u8(
+            ((header.query as u8) << 7) |
+            ((header.opcode as u8) & 0xf << 3) |
+            ((header.authoritative as u8) << 2) |
+            ((header.truncated as u8) << 1) |
+            header.recur_desired as u8
+        );
+        buf.put_u8(
+            ((header.recur_available as u8) << 7) |
+            (0 << 4) | // Z bits
+            ((header.rcode as u8) & 0xf)
+        );
+        buf.put_u16_be(header.qdcount);
+        buf.put_u16_be(header.ancount);
+        buf.put_u16_be(header.nscount);
+        buf.put_u16_be(header.arcount);
+        Ok(())
+    }
+
+    fn encode_name(&mut self, name: &Vec<String>, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        for label in name {
+            buf.put_u8(label.as_bytes().len() as u8);
+            buf.put_slice(label.as_bytes());
+        }
+        buf.put_u8(0);
+        Ok(())
+    }
+
+    fn encode_rr(&mut self, rr: &DnsResourceRecord, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        self.encode_name(&rr.name, buf)?;
+        buf.put_u16_be(rr.rtype as u16);
+        buf.put_u16_be(rr.rclass as u16);
+        buf.put_u32_be(rr.ttl);
+        match rr.data {
+            DnsRRData::A(addr4) => {
+                buf.put_u16_be(4);
+                buf.put_u32_be(u32::from(addr4))
+            },
+            DnsRRData::AAAA(addr6) => {
+                buf.put_u16_be(16);
+                let octets = addr6.octets();
+                for i in 0..16 {
+                    buf.put_u8(octets[i]);
+                }
+            }
+        }
         Ok(())
     }
 }
