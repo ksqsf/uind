@@ -1,77 +1,128 @@
-struct DnsMessage {
-    header: DnsHeader,
-    question: Vec<DnsQuestion>,
-    answer: Vec<DnsResourceRecord>,
-    authority: Vec<DnsResourceRecord>,
-    additional: Vec<DnsResourceRecord>,
+use std::net::{Ipv4Addr, Ipv6Addr};
+
+#[derive(Clone, Debug, Default)]
+pub struct DnsMessage {
+    pub header: DnsHeader,
+    pub question: Vec<DnsQuestion>,
+    pub answer: Vec<DnsResourceRecord>,
+    pub authority: Vec<DnsResourceRecord>,
+    pub additional: Vec<DnsResourceRecord>,
 }
 
-struct DnsHeader {
-    id: u16,
-    query: bool,
-    opcode: DnsOpcode,
-    authoritative: bool,
-    truncation: bool,
-    recur_desired: bool,
-    recur_available: bool,
-    rcode: DnsRcode,
-    qdcount: u16,
-    nscount: u16,
-    arcount: u16,
+#[derive(Clone, Debug, Default)]
+pub struct DnsHeader {
+    pub id: u16,
+    pub query: bool,
+    pub opcode: DnsOpcode,
+    pub authoritative: bool,
+    pub truncation: bool,
+    pub recur_desired: bool,
+    pub recur_available: bool,
+    pub reserved: u8,
+    pub rcode: DnsRcode,
+    pub qdcount: u16,
+    pub ancount: u16,
+    pub nscount: u16,
+    pub arcount: u16,
 }
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-enum DnsOpcode {
+pub enum DnsOpcode {
     Query,
     InverseQuery,
     Status,
-    _Reserved3,
-    _Reserved4,
-    _Reserved5,
-    _Reserved6,
-    _Reserved7,
-    _Reserved8,
-    _Reserved9,
-    _Reserved10,
-    _Reserved11,
-    _Reserved12,
-    _Reserved13,
-    _Reserved14,
-    _Reserved15,
 }
 
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
-enum DnsRcode {
+pub enum DnsRcode {
     NoErrorCondition,
     FormatError,
     ServerFailure,
     NameError,
     NotImplemented,
     Refused,
-    _Reserved6,
-    _Reserved7,
-    _Reserved8,
-    _Reserved9,
-    _Reserved10,
-    _Reserved11,
-    _Reserved12,
-    _Reserved13,
-    _Reserved14,
-    _Reserved15,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DnsQuestion {
+    pub qname: Vec<String>,
+    pub qtype: DnsType,
+    pub qclass: DnsClass,
 }
 
 #[derive(Clone, Debug)]
-struct DnsQuestion {
-    qname: Vec<String>,
-    qtype: u16,
-    qclass: u16,
+pub struct DnsResourceRecord {
+    pub name: Vec<String>,
+    pub rtype: DnsType,
+    pub rclass: DnsClass,
+    pub ttl: u32,
+    pub data: DnsRRData
 }
 
-struct DnsResourceRecord {
-    name: String,
-    rrtype: u16,
-    class: u16,
-    ttl: u32,
+#[derive(Clone, Debug)]
+pub enum DnsRRData {
+    A(Ipv4Addr),
+    AAAA(Ipv6Addr),
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum DnsType {
+    A = 1,
+    NS,
+    MD,
+    MF,
+    CNAME,
+    SOA,
+    MB,
+    MG,
+    MR,
+    NULL,
+    WKS,
+    PTR,
+    HINFO,
+    MINFO,
+    MX,
+    TXT,
+    AAAA = 28,
+    AXFR = 252,
+    MAILB,
+    MAILA,
+    Any,
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum DnsClass {
+    Internet = 1,
+    _CSNet,
+    _CHAOS,
+    _Hesiod,
+    Any = 255,
+}
+
+impl Default for DnsType {
+    fn default() -> DnsType {
+        DnsType::A
+    }
+}
+
+impl Default for DnsClass {
+    fn default() -> DnsClass {
+        DnsClass::Internet
+    }
+}
+
+impl Default for DnsOpcode {
+    fn default() -> DnsOpcode {
+        DnsOpcode::Query
+    }
+}
+
+impl Default for DnsRcode {
+    fn default() -> DnsRcode {
+        DnsRcode::NoErrorCondition
+    }
 }
