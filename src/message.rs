@@ -9,6 +9,12 @@ pub struct DnsMessage {
     pub additional: Vec<DnsResourceRecord>,
 }
 
+impl DnsMessage {
+    pub fn is_query(&self) -> bool {
+        self.header.query
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct DnsHeader {
     pub id: u16,
@@ -20,10 +26,6 @@ pub struct DnsHeader {
     pub recur_available: bool,
     pub reserved: u8,
     pub rcode: DnsRcode,
-    pub qdcount: u16,
-    pub ancount: u16,
-    pub nscount: u16,
-    pub arcount: u16,
 }
 
 #[repr(u8)]

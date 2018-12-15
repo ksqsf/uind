@@ -69,7 +69,6 @@ impl Decoder for DnsMessageCodec {
                     ))
                 }
             },
-            qdcount, ancount, nscount, arcount
         };
 
         self.offset = 12;
@@ -217,7 +216,7 @@ impl Encoder for DnsMessageCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: DnsMessage, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
-        self.encode_header(&item.header, buf)?;
+        self.encode_header(&item, buf)?;
         for question in item.question {
             self.encode_name(&question.qname, buf)?;
             buf.put_u16_be(question.qtype as u16);
@@ -237,24 +236,24 @@ impl Encoder for DnsMessageCodec {
 }
 
 impl DnsMessageCodec {
-    fn encode_header(&mut self, header: &DnsHeader, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
-        buf.put_u16_be(header.id);
+    fn encode_header(&mut self, message: &DnsMessage, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        buf.put_u16_be(message.header.id);
         buf.put_u8(
-            ((header.query as u8) << 7) |
-            ((header.opcode as u8) & 0xf << 3) |
-            ((header.authoritative as u8) << 2) |
-            ((header.truncated as u8) << 1) |
-            header.recur_desired as u8
+            ((message.header.query as u8) << 7) |
+            ((message.header.opcode as u8) & 0xf << 3) |
+            ((message.header.authoritative as u8) << 2) |
+            ((message.header.truncated as u8) << 1) |
+            message.header.recur_desired as u8
         );
         buf.put_u8(
-            ((header.recur_available as u8) << 7) |
+            ((message.header.recur_available as u8) << 7) |
             (0 << 4) | // Z bits
-            ((header.rcode as u8) & 0xf)
+            ((message.header.rcode as u8) & 0xf)
         );
-        buf.put_u16_be(header.qdcount);
-        buf.put_u16_be(header.ancount);
-        buf.put_u16_be(header.nscount);
-        buf.put_u16_be(header.arcount);
+        buf.put_u16_be(message.question.len() as u16);
+        buf.put_u16_be(message.answer.len() as u16);
+        buf.put_u16_be(message.authority.len() as u16);
+        buf.put_u16_be(message.additional.len() as u16);
         Ok(())
     }
 
@@ -299,7 +298,6 @@ mod tests {
             header: DnsHeader {
                 id: 12345,
                 truncated: true,
-                qdcount: 1,
                 ..Default::default()
             },
             question: vec![DnsQuestion {
@@ -324,8 +322,6 @@ mod tests {
             header: DnsHeader {
                 id: 12345,
                 truncated: true,
-                qdcount: 1,
-                ancount: 1,
                 ..Default::default()
             },
             question: vec![DnsQuestion {
