@@ -52,7 +52,7 @@ pub struct DnsQuestion {
     pub qclass: DnsClass,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DnsResourceRecord {
     pub name: Vec<String>,
     pub rtype: DnsType,
@@ -61,7 +61,7 @@ pub struct DnsResourceRecord {
     pub data: DnsRRData
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DnsRRData {
     A(Ipv4Addr),
     AAAA(Ipv6Addr),

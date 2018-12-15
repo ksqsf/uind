@@ -118,10 +118,9 @@ impl Decoder for DnsMessageCodec {
 impl DnsMessageCodec {
     fn next_rr(&mut self, src: &mut BytesMut) -> Result<DnsResourceRecord, <Self as Decoder>::Error> {
         let name = self.next_name(src)?;
-        println!("{:?}", name);
         let rtype = self.next_type(src)?;
         let rclass = self.next_class(src)?;
-        let ttl = ((src[self.offset] as u32) << 24) | ((src[self.offset] as u32) << 16) | ((src[self.offset] as u32) << 8) | (src[self.offset] as u32);
+        let ttl = ((src[self.offset] as u32) << 24) | ((src[self.offset+1] as u32) << 16) | ((src[self.offset+2] as u32) << 8) | (src[self.offset+3] as u32);
         self.offset += 4;
 
         let rdlen = ((src[self.offset] as u16) << 8) | (src[self.offset+1] as u16);
@@ -287,5 +286,70 @@ impl DnsMessageCodec {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_both_1() {
+        let message = DnsMessage {
+            header: DnsHeader {
+                id: 12345,
+                truncated: true,
+                qdcount: 1,
+                ..Default::default()
+            },
+            question: vec![DnsQuestion {
+                qname: vec!["ksqsf".to_owned(), "moe".to_owned()],
+                qtype: DnsType::AAAA,
+                qclass: DnsClass::Any,
+            }],
+            ..Default::default()
+        };
+        let mut buf = BytesMut::new();
+        let mut codec = DnsMessageCodec::new();
+        codec.encode(message, &mut buf).expect("encode");
+        let decoded = codec.decode(&mut buf).expect("no error").expect("parse complete");
+        assert_eq!(decoded.header.id, 12345);
+        assert_eq!(decoded.header.truncated, true);
+        assert_eq!(&decoded.question[0].qname.as_ref(), &["ksqsf", "moe"]);
+    }
+
+    #[test]
+    fn test_both_2() {
+        let message = DnsMessage {
+            header: DnsHeader {
+                id: 12345,
+                truncated: true,
+                qdcount: 1,
+                ancount: 1,
+                ..Default::default()
+            },
+            question: vec![DnsQuestion {
+                qname: vec!["ksqsf".to_owned(), "moe".to_owned()],
+                qtype: DnsType::AAAA,
+                qclass: DnsClass::Any,
+            }],
+            answer: vec![DnsResourceRecord {
+                name: vec!["ksqsf".to_owned(), "moe".to_owned()],
+                rtype: DnsType::A,
+                rclass: DnsClass::Internet,
+                ttl: 120,
+                data: DnsRRData::A(Ipv4Addr::new(127, 0, 0, 1))
+            }],
+            ..Default::default()
+        };
+        let mut buf = BytesMut::with_capacity(4096);
+        let mut codec = DnsMessageCodec::new();
+        codec.encode(message, &mut buf).expect("encode");
+        let decoded = codec.decode(&mut buf).expect("no error").expect("parse complete");
+        assert_eq!(decoded.header.id, 12345);
+        assert_eq!(decoded.header.truncated, true);
+        assert_eq!(&decoded.answer[0].name.as_ref(), &["ksqsf", "moe"]);
+        assert_eq!(decoded.answer[0].ttl, 120);
+        assert_eq!(decoded.answer[0].data, DnsRRData::A(Ipv4Addr::new(127, 0, 0, 1)));
     }
 }
