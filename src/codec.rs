@@ -79,7 +79,7 @@ impl Decoder for DnsMessageCodec {
         for _ in 0..ancount {
             match self.next_rr(src) {
                 Ok(rr) => answer.push(rr),
-                Err(e) => println!("{}", e)
+                Err(e) => error!("{}", e)
             }
         }
 
@@ -87,7 +87,7 @@ impl Decoder for DnsMessageCodec {
         for _ in 0..nscount {
             match self.next_rr(src) {
                 Ok(rr) => authority.push(rr),
-                Err(e) => println!("{}", e)
+                Err(e) => error!("{}", e)
             }
             authority.push(self.next_rr(src)?);
         }
@@ -96,7 +96,7 @@ impl Decoder for DnsMessageCodec {
         for _ in 0..arcount {
             match self.next_rr(src) {
                 Ok(rr) => additional.push(rr),
-                Err(e) => println!("{}", e)
+                Err(e) => error!("{}", e)
             }
         }
 
