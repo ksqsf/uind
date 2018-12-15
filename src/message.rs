@@ -36,6 +36,17 @@ pub enum DnsOpcode {
     Status,
 }
 
+impl DnsOpcode {
+    pub fn try_from(x: u8) -> Option<DnsOpcode> {
+        match x {
+            0 => Some(DnsOpcode::Query),
+            1 => Some(DnsOpcode::InverseQuery),
+            2 => Some(DnsOpcode::Status),
+            _ => None,
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub enum DnsRcode {
@@ -45,6 +56,20 @@ pub enum DnsRcode {
     NameError,
     NotImplemented,
     Refused,
+}
+
+impl DnsRcode {
+    pub fn try_from(x: u8) -> Option<DnsRcode> {
+        match x {
+            0 => Some(DnsRcode::NoErrorCondition),
+            1 => Some(DnsRcode::FormatError),
+            2 => Some(DnsRcode::ServerFailure),
+            3 => Some(DnsRcode::NameError),
+            4 => Some(DnsRcode::NotImplemented),
+            5 => Some(DnsRcode::Refused),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -95,6 +120,35 @@ pub enum DnsType {
     Any,
 }
 
+impl DnsType {
+    pub fn try_from(x: u16) -> Option<DnsType> {
+        match x {
+            1 => Some(DnsType::A),
+            2 => Some(DnsType::NS),
+            3 => Some(DnsType::MD),
+            4 => Some(DnsType::MF),
+            5 => Some(DnsType::CNAME),
+            6 => Some(DnsType::SOA),
+            7 => Some(DnsType::MB),
+            8 => Some(DnsType::MG),
+            9 => Some(DnsType::MR),
+            10 => Some(DnsType::NULL),
+            11 => Some(DnsType::WKS),
+            12 => Some(DnsType::PTR),
+            13 => Some(DnsType::HINFO),
+            14 => Some(DnsType::MINFO),
+            15 => Some(DnsType::MX),
+            16 => Some(DnsType::TXT),
+            28 => Some(DnsType::AAAA),
+            252 => Some(DnsType::AXFR),
+            253 => Some(DnsType::MAILB),
+            254 => Some(DnsType::MAILA),
+            255 => Some(DnsType::Any),
+            _ => None
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
 pub enum DnsClass {
@@ -103,6 +157,16 @@ pub enum DnsClass {
     _CHAOS,
     _Hesiod,
     Any = 255,
+}
+
+impl DnsClass {
+    pub fn try_from(x: u16) -> Option<DnsClass> {
+        match x {
+            1 => Some(DnsClass::Internet),
+            255 => Some(DnsClass::Any),
+            _ => None,
+        }
+    }
 }
 
 impl Default for DnsType {

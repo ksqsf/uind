@@ -39,14 +39,12 @@ impl Decoder for DnsMessageCodec {
         let header = DnsHeader {
             id,
             query: qr == 1,
-            opcode: match opcode {
-                0 => DnsOpcode::Query,
-                1 => DnsOpcode::InverseQuery,
-                2 => DnsOpcode::Status,
-                _ => {
+            opcode: match DnsOpcode::try_from(opcode) {
+                Some(opcode) => opcode,
+                None => {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
-                        "opcode not recognized"
+                        format!("opcode {} not recognized", opcode)
                     ))
                 }
             },
@@ -55,17 +53,12 @@ impl Decoder for DnsMessageCodec {
             recur_desired: rd == 1,
             recur_available: ra == 1,
             reserved: z,
-            rcode: match rcode {
-                0 => DnsRcode::NoErrorCondition,
-                1 => DnsRcode::FormatError,
-                2 => DnsRcode::ServerFailure,
-                3 => DnsRcode::NameError,
-                4 => DnsRcode::NotImplemented,
-                5 => DnsRcode::Refused,
-                _ => {
+            rcode: match DnsRcode::try_from(rcode) {
+                Some(rcode) => rcode,
+                None => {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
-                        "response code not recognized"
+                        format!("response code {} not recognized", rcode)
                     ))
                 }
             },
@@ -166,31 +159,12 @@ impl DnsMessageCodec {
     }
 
     fn next_type(&mut self, src: &mut BytesMut) -> Result<DnsType, <Self as Decoder>::Error> {
-        let ty = match ((src[self.offset] as u16) << 8) | (src[self.offset+1] as u16) {
-            1 => DnsType::A,
-            2 => DnsType::NS,
-            3 => DnsType::MD,
-            4 => DnsType::MF,
-            5 => DnsType::CNAME,
-            6 => DnsType::SOA,
-            7 => DnsType::MB,
-            8 => DnsType::MG,
-            9 => DnsType::MR,
-            10 => DnsType::NULL,
-            11 => DnsType::WKS,
-            12 => DnsType::PTR,
-            13 => DnsType::HINFO,
-            14 => DnsType::MINFO,
-            15 => DnsType::MX,
-            16 => DnsType::TXT,
-            28 => DnsType::AAAA,
-            252 => DnsType::AXFR,
-            253 => DnsType::MAILB,
-            254 => DnsType::MAILA,
-            255 => DnsType::Any,
-            i @ _ => return Err(Error::new(
+        let x = ((src[self.offset] as u16) << 8) | (src[self.offset+1] as u16);
+        let ty = match DnsType::try_from(x) {
+            Some(ty) => ty,
+            None => return Err(Error::new(
                 ErrorKind::InvalidData,
-                format!("unknown type {}", i)
+                format!("unknown type {}", x)
             ))
         };
         self.offset += 2;
@@ -198,12 +172,12 @@ impl DnsMessageCodec {
     }
 
     fn next_class(&mut self, src: &mut BytesMut) -> Result<DnsClass, <Self as Decoder>::Error> {
-        let qclass = match ((src[self.offset] as u16) << 8) | (src[self.offset+1] as u16) {
-            1 => DnsClass::Internet,
-            255 => DnsClass::Any,
-            _ => return Err(Error::new(
+        let x = ((src[self.offset] as u16) << 8) | (src[self.offset+1] as u16);
+        let qclass = match DnsClass::try_from(x) {
+            Some(qclass) => qclass,
+            None => return Err(Error::new(
                 ErrorKind::InvalidData,
-                "unknown class"
+                format!("unknown class {}", x)
             ))
         };
         self.offset += 2;
