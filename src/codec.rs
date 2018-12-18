@@ -31,6 +31,7 @@ impl Decoder for DnsMessageCodec {
     type Error = Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        //return Err(Error::new(ErrorKind::Interrupted, "test"));
         if src.len() < 12 {
             return Ok(None)
         }
@@ -145,7 +146,38 @@ impl DnsMessageCodec {
                     ((src[self.offset+14] as u16) << 8) | (src[self.offset+15] as u16),
                 ))
             }
-            (_, _) => return Err(Error::new(ErrorKind::InvalidData, "unknown rdata"))
+            (DnsClass::Internet, DnsType::MX) => {
+                let preference = (src[self.offset+0] as u16) << 8 | (src[self.offset+1] as u16);
+                self.offset += 2;
+                let name = self.next_name(src)?;
+                self.offset -= rdlen as usize;
+                DnsRRData::MX(preference, name)
+            }
+            (DnsClass::Internet, DnsType::CNAME) => {
+                let name = self.next_name(src)?;
+                self.offset -= rdlen as usize;
+                DnsRRData::CNAME(name)
+            }
+            (DnsClass::Internet, DnsType::TXT) => {
+                DnsRRData::TXT(String::from_utf8_lossy(&src[self.offset..self.offset+rdlen as usize]).to_string())
+            }
+            (DnsClass::Internet, DnsType::SOA) => {
+                let (mname, rname, serial, refresh, retry, expire, minimum);
+                mname = self.next_name(src)?;
+                rname = self.next_name(src)?;
+                serial = (src[self.offset] as u32) << 24 | (src[self.offset+1] as u32) << 16 | (src[self.offset+2] as u32) << 8 | (src[self.offset+3] as u32);
+                self.offset += 4;
+                refresh = (src[self.offset] as u32) << 24 | (src[self.offset+1] as u32) << 16 | (src[self.offset+2] as u32) << 8 | (src[self.offset+3] as u32);
+                self.offset += 4;
+                retry = (src[self.offset] as u32) << 24 | (src[self.offset+1] as u32) << 16 | (src[self.offset+2] as u32) << 8 | (src[self.offset+3] as u32);
+                self.offset += 4;
+                expire = (src[self.offset] as u32) << 24 | (src[self.offset+1] as u32) << 16 | (src[self.offset+2] as u32) << 8 | (src[self.offset+3] as u32);
+                self.offset += 4;
+                minimum = (src[self.offset] as u32) << 24 | (src[self.offset+1] as u32) << 16 | (src[self.offset+2] as u32) << 8 | (src[self.offset+3] as u32);
+                self.offset += 4;
+                DnsRRData::SOA(mname, rname, serial, refresh, retry, expire, minimum)
+            }
+            (_, _) => return Err(Error::new(ErrorKind::InvalidData, format!("unknown rdata {}", rtype as u16)))
         };
 
         self.offset += rdlen as usize;
@@ -166,17 +198,24 @@ impl DnsMessageCodec {
             self.offset += 1;
         }
 
-        //if (label_len >> 6 & 0x3) == 3 { self.offset += 1; }
-
         if (label_len >> 6) & 0x3 == 0x3 {
             let mut i = (label_len & 0b111111) as usize | (src[self.offset] as usize);
-            self.offset += 1;
+            self.offset += 1;  // Skip the second byte of the pointer
             debug!("pointer start at {}", i);
 
             label_len = src[i];
             i = i + 1;
 
-            while label_len != 0 && (label_len >> 6) & 0x3 != 0x3 {
+            while label_len != 0 {
+                // Jump to the actual label
+                while (label_len >> 6) & 0x3 == 0x3 {
+                    i = (label_len & 0b111111) as usize | (src[i] as usize);
+                    debug!("Jump to {}", i);
+                    label_len = src[i];
+                    i += 1;
+                }
+
+                // Do the actual parse
                 name.push(String::from_utf8_lossy(&src[i..i+label_len as usize]).into_owned());
                 i += label_len as usize;
                 label_len = src[i];
@@ -270,6 +309,16 @@ impl DnsMessageCodec {
     }
 
     fn encode_rr(&mut self, rr: &DnsResourceRecord, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        fn name_length(name: &Vec<String>) -> u16 {
+            let mut len = 0u16;
+            for i in name {
+                len += 1;
+                len += i.as_bytes().len() as u16;
+            }
+            len += 1; // final zero
+            return len;
+        }
+
         self.encode_name(&rr.name, buf)?;
         buf.put_u16_be(rr.rtype as u16);
         buf.put_u16_be(rr.rclass as u16);
@@ -278,13 +327,36 @@ impl DnsMessageCodec {
             DnsRRData::A(addr4) => {
                 buf.put_u16_be(4);
                 buf.put_u32_be(u32::from(addr4))
-            },
+            }
             DnsRRData::AAAA(addr6) => {
                 buf.put_u16_be(16);
                 let octets = addr6.octets();
                 for i in 0..16 {
                     buf.put_u8(octets[i]);
                 }
+            }
+            DnsRRData::MX(pref, ref name) => {
+                buf.put_u16_be(name_length(name) + 2);
+                buf.put_u16_be(pref);
+                self.encode_name(name, buf)?;
+            }
+            DnsRRData::CNAME(ref name) => {
+                buf.put_u16_be(name_length(name));
+                self.encode_name(name, buf)?;
+            }
+            DnsRRData::TXT(ref txt) => {
+                buf.put_u16_be(txt.as_bytes().len() as u16);
+                buf.put(txt.as_bytes());
+            }
+            DnsRRData::SOA(ref mname, ref rname, serial, refresh, retry, expire, minimum) => {
+                buf.put_u16_be(name_length(mname) + name_length(rname) + 4 * 5);
+                self.encode_name(mname, buf)?;
+                self.encode_name(rname, buf)?;
+                buf.put_u32_be(serial);
+                buf.put_u32_be(refresh);
+                buf.put_u32_be(retry);
+                buf.put_u32_be(expire);
+                buf.put_u32_be(minimum);
             }
         }
         Ok(())
@@ -393,4 +465,3 @@ mod tests {
         }
     }
 }
-
