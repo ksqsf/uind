@@ -93,8 +93,9 @@ pub enum DnsRRData {
     AAAA(Ipv6Addr),
     MX(u16, Vec<String>),
     CNAME(Vec<String>),
-    TXT(String),
+    TXT(Vec<String>),
     SOA(Vec<String>, Vec<String>, u32, u32, u32, u32, u32),
+    NS(Vec<String>),
 }
 
 #[repr(u8)]
