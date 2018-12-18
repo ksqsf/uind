@@ -6,6 +6,15 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use crate::message::{DnsMessage, DnsHeader, DnsQuestion, DnsResourceRecord};
 use crate::message::{DnsRRData, DnsOpcode, DnsRcode, DnsType, DnsClass};
 
+macro_rules! or_continue {
+    ( $x:expr ) => {
+        match $x {
+            Ok(v) => v,
+            Err(e) => {error!("{}", e); continue;}
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct DnsMessageCodec {
     offset: usize
@@ -22,6 +31,10 @@ impl Decoder for DnsMessageCodec {
     type Error = Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        if src.len() < 12 {
+            return Ok(None)
+        }
+
         let id = ((src[0] as u16) << 8) | (src[1] as u16);
         let qr = (src[2] >> 7) & 1;
         let opcode = (src[2] >> 3) & 0xf;
@@ -29,7 +42,7 @@ impl Decoder for DnsMessageCodec {
         let tc = (src[2] >> 1) & 1;
         let rd = src[2] & 1;
         let ra = (src[3] >> 7) & 1;
-        let z = (src[3] >> 4) & 0x7;
+        let _z = (src[3] >> 4) & 0x7;
         let rcode = src[3] & 0xf;
         let qdcount = ((src[4] as u16) << 8) + (src[5] as u16);
         let ancount = ((src[6] as u16) << 8) + (src[7] as u16);
@@ -38,7 +51,7 @@ impl Decoder for DnsMessageCodec {
 
         let header = DnsHeader {
             id,
-            query: qr == 1,
+            query: qr == 0,
             opcode: match DnsOpcode::try_from(opcode) {
                 Some(opcode) => opcode,
                 None => {
@@ -52,7 +65,6 @@ impl Decoder for DnsMessageCodec {
             truncated: tc == 1,
             recur_desired: rd == 1,
             recur_available: ra == 1,
-            reserved: z,
             rcode: match DnsRcode::try_from(rcode) {
                 Some(rcode) => rcode,
                 None => {
@@ -66,12 +78,11 @@ impl Decoder for DnsMessageCodec {
 
         self.offset = 12;
 
-        // TODO: 4.1.4 Message Compression
         let mut question = Vec::new();
         for _ in 0..qdcount {
-            let qname = self.next_name(src)?;
-            let qtype = self.next_type(src)?;
-            let qclass = self.next_class(src)?;
+            let qname = or_continue!(self.next_name(src));
+            let qtype = or_continue!(self.next_type(src));
+            let qclass = or_continue!(self.next_class(src));
             question.push(DnsQuestion{qname, qtype, qclass});
         }
 
@@ -79,7 +90,7 @@ impl Decoder for DnsMessageCodec {
         for _ in 0..ancount {
             match self.next_rr(src) {
                 Ok(rr) => answer.push(rr),
-                Err(e) => error!("{}", e)
+                Err(e) => error!("error parsing answer {}", e)
             }
         }
 
@@ -87,16 +98,15 @@ impl Decoder for DnsMessageCodec {
         for _ in 0..nscount {
             match self.next_rr(src) {
                 Ok(rr) => authority.push(rr),
-                Err(e) => error!("{}", e)
+                Err(e) => error!("error parsing authority {}", e)
             }
-            authority.push(self.next_rr(src)?);
         }
 
         let mut additional = Vec::new();
         for _ in 0..arcount {
             match self.next_rr(src) {
                 Ok(rr) => additional.push(rr),
-                Err(e) => error!("{}", e)
+                Err(e) => error!("error parsing additional: {}", e)
             }
         }
 
@@ -148,11 +158,30 @@ impl DnsMessageCodec {
         let mut label_len = src[self.offset];
         self.offset += 1;
 
-        while label_len != 0 {
+        while label_len != 0 && (label_len >> 6) & 0x3 != 0x3 {
+            // Label
             name.push(String::from_utf8_lossy(&src[self.offset..self.offset+label_len as usize]).into_owned());
             self.offset += label_len as usize;
             label_len = src[self.offset];
             self.offset += 1;
+        }
+
+        //if (label_len >> 6 & 0x3) == 3 { self.offset += 1; }
+
+        if (label_len >> 6) & 0x3 == 0x3 {
+            let mut i = (label_len & 0b111111) as usize | (src[self.offset] as usize);
+            self.offset += 1;
+            debug!("pointer start at {}", i);
+
+            label_len = src[i];
+            i = i + 1;
+
+            while label_len != 0 && (label_len >> 6) & 0x3 != 0x3 {
+                name.push(String::from_utf8_lossy(&src[i..i+label_len as usize]).into_owned());
+                i += label_len as usize;
+                label_len = src[i];
+                i += 1;
+            }
         }
 
         Ok(name)
@@ -160,6 +189,7 @@ impl DnsMessageCodec {
 
     fn next_type(&mut self, src: &mut BytesMut) -> Result<DnsType, <Self as Decoder>::Error> {
         let x = ((src[self.offset] as u16) << 8) | (src[self.offset+1] as u16);
+        self.offset += 2;
         let ty = match DnsType::try_from(x) {
             Some(ty) => ty,
             None => return Err(Error::new(
@@ -167,12 +197,12 @@ impl DnsMessageCodec {
                 format!("unknown type {}", x)
             ))
         };
-        self.offset += 2;
         Ok(ty)
     }
 
     fn next_class(&mut self, src: &mut BytesMut) -> Result<DnsClass, <Self as Decoder>::Error> {
         let x = ((src[self.offset] as u16) << 8) | (src[self.offset+1] as u16);
+        self.offset += 2;
         let qclass = match DnsClass::try_from(x) {
             Some(qclass) => qclass,
             None => return Err(Error::new(
@@ -180,7 +210,6 @@ impl DnsMessageCodec {
                 format!("unknown class {}", x)
             ))
         };
-        self.offset += 2;
         Ok(qclass)
     }
 }
@@ -213,7 +242,7 @@ impl DnsMessageCodec {
     fn encode_header(&mut self, message: &DnsMessage, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
         buf.put_u16_be(message.header.id);
         buf.put_u8(
-            ((message.header.query as u8) << 7) |
+            ((!message.header.query as u8) << 7) |
             ((message.header.opcode as u8) & 0xf << 3) |
             ((message.header.authoritative as u8) << 2) |
             ((message.header.truncated as u8) << 1) |
@@ -271,6 +300,7 @@ mod tests {
         let message = DnsMessage {
             header: DnsHeader {
                 id: 12345,
+                query: true,
                 truncated: true,
                 ..Default::default()
             },
@@ -286,6 +316,7 @@ mod tests {
         codec.encode(message, &mut buf).expect("encode");
         let decoded = codec.decode(&mut buf).expect("no error").expect("parse complete");
         assert_eq!(decoded.header.id, 12345);
+        assert_eq!(decoded.header.query, true);
         assert_eq!(decoded.header.truncated, true);
         assert_eq!(&decoded.question[0].qname.as_ref(), &["ksqsf", "moe"]);
     }
@@ -322,4 +353,44 @@ mod tests {
         assert_eq!(decoded.answer[0].ttl, 120);
         assert_eq!(decoded.answer[0].data, DnsRRData::A(Ipv4Addr::new(127, 0, 0, 1)));
     }
+
+    #[test]
+    fn test_many() {
+        let mut buf = BytesMut::with_capacity(4096);
+        let mut codec = DnsMessageCodec::new();
+        let message = DnsMessage {
+            header: DnsHeader {
+                id: 12345,
+                truncated: true,
+                ..Default::default()
+            },
+            question: vec![DnsQuestion {
+                qname: vec!["ksqsf".to_owned(), "moe".to_owned()],
+                qtype: DnsType::AAAA,
+                qclass: DnsClass::Any,
+            }],
+            answer: vec![DnsResourceRecord {
+                name: vec!["ksqsf".to_owned(), "moe".to_owned()],
+                rtype: DnsType::A,
+                rclass: DnsClass::Internet,
+                ttl: 120,
+                data: DnsRRData::A(Ipv4Addr::new(127, 0, 0, 1))
+            }],
+            ..Default::default()
+        };
+        for _ in 0..16 {
+            codec.encode(message.clone(), &mut buf).expect("encode");
+        }
+        for _ in 0..16 {
+            match codec.decode(&mut buf) {
+                Ok(Some(_)) => (),
+                _ => unreachable!()
+            }
+        }
+        match codec.decode(&mut buf) {
+            Ok(Some(_)) => unreachable!(),
+            _ => ()
+        }
+    }
 }
+

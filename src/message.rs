@@ -24,7 +24,6 @@ pub struct DnsHeader {
     pub truncated: bool,
     pub recur_desired: bool,
     pub recur_available: bool,
-    pub reserved: u8,
     pub rcode: DnsRcode,
 }
 
