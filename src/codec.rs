@@ -304,7 +304,6 @@ impl DnsMessageCodec {
     }
 }
 
-// TODO: Fix truncation flag
 impl Encoder for DnsMessageCodec {
     type Item = DnsMessage;
     type Error = std::io::Error;
@@ -331,6 +330,9 @@ impl Encoder for DnsMessageCodec {
             newbuf.put_u16_be(buf.len() as u16);
             newbuf.extend_from_slice(&buf[..]);
             std::mem::swap(&mut newbuf, buf);
+        } else if buf.len() > 512 {
+            buf[3] |= 0b10;
+            buf.truncate(512);
         }
 
         Ok(())
