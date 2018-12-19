@@ -1,5 +1,7 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
+pub type DomainName = Vec<String>;
+
 #[derive(Clone, Debug, Default)]
 pub struct DnsMessage {
     pub header: DnsHeader,
@@ -73,14 +75,14 @@ impl DnsRcode {
 
 #[derive(Clone, Debug, Default)]
 pub struct DnsQuestion {
-    pub qname: Vec<String>,
+    pub qname: DomainName,
     pub qtype: DnsType,
     pub qclass: DnsClass,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DnsResourceRecord {
-    pub name: Vec<String>,
+    pub name: DomainName,
     pub rtype: DnsType,
     pub rclass: DnsClass,
     pub ttl: u32,
@@ -92,7 +94,7 @@ pub enum DnsRRData {
     A(Ipv4Addr),
     AAAA(Ipv6Addr),
     MX(u16, Vec<String>),
-    CNAME(Vec<String>),
+    CNAME(DomainName),
     TXT(Vec<String>),
     SOA(Vec<String>, Vec<String>, u32, u32, u32, u32, u32),
     NS(Vec<String>),

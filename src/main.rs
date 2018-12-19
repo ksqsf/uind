@@ -1,3 +1,5 @@
+#![feature(drain_filter)]
+
 use futures::prelude::*;
 use futures::future::{self, Either};
 use futures::sync::mpsc;
@@ -35,7 +37,7 @@ fn main() {
     let udp_sock = UdpSocket::bind(&"0.0.0.0:53".parse().unwrap()).unwrap();
     let tcp_sock = TcpListener::bind(&"0.0.0.0:53".parse().unwrap()).unwrap();
 
-    let clients: Arc<Mutex<HashMap<u16, SocketAddr>>> = Arc::new(Mutex::new(HashMap::new()));
+    let clients: Arc<Mutex<HashMap<u16, (SocketAddr, Vec<DnsResourceRecord>)>>> = Arc::new(Mutex::new(HashMap::new()));
     let (udp_out, udp_in) = UdpFramed::new(udp_sock, DnsMessageCodec::new(false)).split();
     let (tx, rx) = mpsc::unbounded::<(DnsMessage, SocketAddr)>();
 
@@ -46,17 +48,31 @@ fn main() {
 
     let udp_dispatcher = udp_in
         .map_err(DispatcherError::from)
-        .fold(tx, move |tx, (message, addr)| {
+        .fold(tx, move |tx, (mut message, addr)| {
             let id = message.header.id;
 
             if message.is_query() {
                 info!("Message {:x} from {} is UDP query", id, addr);
-                let fut = tx.send((message, dns_addr)).map_err(DispatcherError::from);
-                clients.lock().unwrap().entry(id).and_modify(|e| *e = addr).or_insert(addr);
+                debug!("Message is {:#?}", message);
+
+                // Filter out questions of type A which have local entries
+                let answers_local = filter_questions(&mut message.question, &local_entries);
+                debug!("After filtration: {:#?}", message);
+
+                // If no question raised, the server won't reply, let's construct a reply
+                let message = if message.question.len() == 0 {from_answer(id, &answers_local)} else {message};
+                let dest = if message.question.len() == 0 {addr} else {dns_addr};
+                let fut = tx.send((message.clone(), dest)).map_err(DispatcherError::from);
+                debug!("UDP send to {} {:?}", dest, message);
+
+                // Send packets
+                clients.lock().unwrap().insert(id, (addr, answers_local));
                 Either::A(fut)
             } else {
                 info!("Message {:x} from {} is UDP response", id, addr);
-                if let Some(client_addr) = clients.lock().unwrap().remove(&id) {
+                if let Some((client_addr, answers_local)) = clients.lock().unwrap().remove(&id) {
+                    message.answer.extend(answers_local);
+                    debug!("Message is {:#?}, sending to {}", message, client_addr);
                     Either::A(tx.send((message, client_addr)).map_err(DispatcherError::from))
                 } else {
                     Either::B(future::ok(tx))
@@ -160,14 +176,15 @@ fn init() -> Result<ServerConfig, String> {
         }
         let (domain_name, answer) = (parts[0], parts[1]);
         let answer = answer.parse().map_err(|_| format!("Can't parse IP address at line {}", lineno+1))?;
+        let domain_name: Vec<_> = domain_name.split(".").map(String::from).collect();
         let answer = DnsResourceRecord {
-            name: domain_name.split(".").map(String::from).collect(),
+            name: domain_name.clone(),
             rclass: DnsClass::Internet,
             rtype: DnsType::A,
             data: DnsRRData::A(answer),
             ttl: 114514
         };
-        let entry = config.local.entry(domain_name.to_string()).or_insert(vec![]);
+        let entry = config.local.entry(domain_name).or_insert(vec![]);
         (*entry).push(answer);
     }
 
@@ -181,7 +198,7 @@ fn init() -> Result<ServerConfig, String> {
     Ok(config)
 }
 
-fn from_answer(id: u16, answer: Vec<DnsResourceRecord>) -> DnsMessage {
+fn from_answer(id: u16, answer: &Vec<DnsResourceRecord>) -> DnsMessage {
     let refused = answer.iter().fold(false, |refused, x| refused || match x.data {
         DnsRRData::A(x) => x == Ipv4Addr::new(0, 0, 0, 0),
         _ => false
@@ -197,15 +214,22 @@ fn from_answer(id: u16, answer: Vec<DnsResourceRecord>) -> DnsMessage {
             recur_desired: true,
             rcode: if refused {DnsRcode::Refused} else {DnsRcode::NoErrorCondition},
         },
-        answer: if refused {vec![]} else {answer},
+        answer: if refused {vec![]} else {answer.clone()},
         ..Default::default()
     }
 }
 
+fn filter_questions(questions: &mut Vec<DnsQuestion>, local_entries: &EntryTable) -> Vec<DnsResourceRecord> {
+    let questions_local: Vec<_> = questions.drain_filter(|x| local_entries.contains_key(&x.qname) && x.qtype == DnsType::A).collect();
+    questions_local.iter().map(|q| local_entries[&q.qname].clone()).flatten().collect()
+}
+
+type EntryTable = HashMap<DomainName, Vec<DnsResourceRecord>>;
+
 #[derive(Debug, Clone)]
 struct ServerConfig {
     dns_addr: SocketAddr,
-    local: HashMap<String, Vec<DnsResourceRecord>>,
+    local: EntryTable,
 }
 
 impl Default for ServerConfig {
