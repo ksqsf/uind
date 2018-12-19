@@ -1,17 +1,20 @@
 #![feature(drain_filter)]
+#![feature(slice_concat_ext)]
 
 use futures::prelude::*;
 use futures::future::{self, Either};
 use futures::sync::mpsc;
+use tokio::prelude::*;
 use tokio::net::{UdpSocket, UdpFramed};
 use tokio::net::{TcpStream, TcpListener};
 use tokio::codec::Decoder;
 use std::collections::HashMap;
-use std::net::{SocketAddr, Ipv4Addr};
+use std::net::{SocketAddr, Ipv4Addr, IpAddr};
 use std::sync::{Arc, Mutex};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader};
+use std::time::Duration;
 
 #[macro_use]
 extern crate log;
@@ -62,16 +65,19 @@ fn main() {
                 // If no question raised, the server won't reply, let's construct a reply
                 let message = if message.question.len() == 0 {from_answer(id, &answers_local)} else {message};
                 let dest = if message.question.len() == 0 {addr} else {dns_addr};
-                let fut = tx.send((message.clone(), dest)).map_err(DispatcherError::from);
-                debug!("UDP send to {} {:?}", dest, message);
 
                 // Send packets
-                clients.lock().unwrap().insert(id, (addr, answers_local));
+                let fut = tx.send((message.clone(), dest)).map_err(DispatcherError::from);
+                debug!("UDP send to {} {:?}", dest, message);
+                if message.question.len() > 0 {
+                    clients.lock().unwrap().insert(id, (addr, answers_local));
+                }
                 Either::A(fut)
             } else {
                 info!("Message {:x} from {} is UDP response", id, addr);
                 if let Some((client_addr, answers_local)) = clients.lock().unwrap().remove(&id) {
                     message.answer.extend(answers_local);
+                    report_answers(&message);
                     debug!("Message is {:#?}, sending to {}", message, client_addr);
                     Either::A(tx.send((message, client_addr)).map_err(DispatcherError::from))
                 } else {
@@ -86,7 +92,7 @@ fn main() {
 
         let forwarder = stream
             .inspect(move |message| info!("Message {:x} from {} is TCP query",
-                                     message.header.id, client_addr))
+                                          message.header.id, client_addr))
             .map_err(|e| error!("error in tcp stream {}", e))
             .fold(sink, move |sink, message| {
                 // Connect to DNS server
@@ -97,7 +103,8 @@ fn main() {
                     .map(|codec| codec.send(message).map_err(|e| error!("error sending tcp {}", e)))
                     .flatten()
                 // Get response
-                    .map(|codec| codec.into_future().map_err(|_| error!("error into fut")))
+                    .map(|codec| codec.into_future().map_err(|_| error!("error into fut"))
+                         .timeout(Duration::from_secs(2)).map_err(|_| error!("request timeout")))
                     .flatten()
                     .then(|result| {
                         match result {
@@ -113,6 +120,7 @@ fn main() {
                         }
                     })
                 // Send to client
+                    .inspect(|message| report_answers(message))
                     .map(|message| sink.send(message).map_err(|e| error!("{}", e)))
                     .flatten()
                 // Done!
@@ -196,6 +204,20 @@ fn init() -> Result<ServerConfig, String> {
     info!("Server config loaded!");
 
     Ok(config)
+}
+
+fn report_answers(message: &DnsMessage) {
+    let report: Vec<_> = message.answer.iter()
+        .filter(|x| match x.data { DnsRRData::A(_) | DnsRRData::AAAA(_) => true, _ => false })
+        .map(|x| (&x.name, match x.data {
+            DnsRRData::A(ip4) => IpAddr::V4(ip4),
+            DnsRRData::AAAA(ip6) => IpAddr::V6(ip6),
+            _ => unreachable!()
+        }))
+        .collect();
+    for (name, ip) in report {
+        println!("{:x}: {}: {}", message.header.id, name.join("."), ip)
+    }
 }
 
 fn from_answer(id: u16, answer: &Vec<DnsResourceRecord>) -> DnsMessage {
