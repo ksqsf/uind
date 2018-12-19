@@ -15,6 +15,7 @@ use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
+use ttl_cache::TtlCache;
 
 #[macro_use]
 extern crate log;
@@ -39,10 +40,11 @@ fn main() {
 
     let udp_sock = UdpSocket::bind(&"0.0.0.0:53".parse().unwrap()).unwrap();
     let tcp_sock = TcpListener::bind(&"0.0.0.0:53".parse().unwrap()).unwrap();
-
-    let clients: Arc<Mutex<HashMap<u16, (SocketAddr, Vec<DnsResourceRecord>)>>> = Arc::new(Mutex::new(HashMap::new()));
     let (udp_out, udp_in) = UdpFramed::new(udp_sock, DnsMessageCodec::new(false)).split();
     let (tx, rx) = mpsc::unbounded::<(DnsMessage, SocketAddr)>();
+
+    let clients: Arc<Mutex<TtlCache<u16, (SocketAddr, Vec<DnsResourceRecord>)>>> = Arc::new(Mutex::new(TtlCache::new(100000)));
+    let ttl = Duration::from_secs(2);
 
     let udp_sender = rx.fold(udp_out, |udp_out, (message, addr)| {
         udp_out.send((message, addr))
@@ -70,7 +72,7 @@ fn main() {
                 let fut = tx.send((message.clone(), dest)).map_err(DispatcherError::from);
                 debug!("UDP send to {} {:?}", dest, message);
                 if message.question.len() > 0 {
-                    clients.lock().unwrap().insert(id, (addr, answers_local));
+                    clients.lock().unwrap().insert(id, (addr, answers_local), ttl);
                 }
                 Either::A(fut)
             } else {
