@@ -1,0 +1,15 @@
+#
+# This is a test dnsrelay.txt
+#
+
+ohno.com 233.233.233.233
+
+# All of them are A records
+example.com 127.0.0.1
+example.com 127.0.0.2
+example.com 127.0.0.3
+example.com 127.0.0.4
+
+# 0.0.0.0 means forbidden
+forbidden.com 0.0.0.0
+

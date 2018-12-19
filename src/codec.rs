@@ -304,6 +304,7 @@ impl DnsMessageCodec {
     }
 }
 
+// TODO: Fix truncation flag
 impl Encoder for DnsMessageCodec {
     type Item = DnsMessage;
     type Error = std::io::Error;
