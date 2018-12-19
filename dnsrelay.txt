@@ -9,6 +9,7 @@ example.com 127.0.0.1
 example.com 127.0.0.2
 example.com 127.0.0.3
 example.com 127.0.0.4
+www.example.com 127.0.0.1
 
 # 0.0.0.0 means forbidden
 forbidden.com 0.0.0.0

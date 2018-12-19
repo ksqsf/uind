@@ -182,7 +182,7 @@ fn init() -> Result<ServerConfig, String> {
             rclass: DnsClass::Internet,
             rtype: DnsType::A,
             data: DnsRRData::A(answer),
-            ttl: 114514
+            ttl: 10
         };
         let entry = config.local.entry(domain_name).or_insert(vec![]);
         (*entry).push(answer);
@@ -220,8 +220,10 @@ fn from_answer(id: u16, answer: &Vec<DnsResourceRecord>) -> DnsMessage {
 }
 
 fn filter_questions(questions: &mut Vec<DnsQuestion>, local_entries: &EntryTable) -> Vec<DnsResourceRecord> {
-    let questions_local: Vec<_> = questions.drain_filter(|x| local_entries.contains_key(&x.qname) && x.qtype == DnsType::A).collect();
-    questions_local.iter().map(|q| local_entries[&q.qname].clone()).flatten().collect()
+    questions.drain_filter(|x| local_entries.contains_key(&x.qname) && x.qtype == DnsType::A)
+        .map(|q| local_entries[&q.qname].clone())
+        .flatten()
+        .collect()
 }
 
 type EntryTable = HashMap<DomainName, Vec<DnsResourceRecord>>;
