@@ -1,5 +1,7 @@
 # UIND
 
+[![Build Status](https://travis-ci.com/ksqsf/uind.svg?token=GDQhd42nKo6c9nzvpUxx&branch=master)](https://travis-ci.com/ksqsf/uind)
+
 UIND is a very simple DNS server and proxy.
 
 ## Command Line
