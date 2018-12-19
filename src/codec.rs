@@ -138,7 +138,7 @@ impl Decoder for DnsMessageCodec {
 }
 
 impl DnsMessageCodec {
-    /// Set function will skip this RR when error occurs.
+    /// This function will skip this RR when error occurs.
     fn next_rr(&mut self, src: &mut BytesMut) -> Result<DnsResourceRecord, <Self as Decoder>::Error> {
         let name = self.next_name(src)?;
 
@@ -309,35 +309,35 @@ impl Encoder for DnsMessageCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: DnsMessage, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        let mut this = BytesMut::with_capacity(4096);
         buf.reserve(4096);
-        self.encode_header(&item, buf)?;
+
+        self.encode_header(&item, &mut this)?;
         for question in item.question {
-            self.encode_name(&question.qname, buf)?;
-            buf.put_u16_be(question.qtype as u16);
-            buf.put_u16_be(question.qclass as u16);
+            self.encode_name(&question.qname, &mut this)?;
+            this.put_u16_be(question.qtype as u16);
+            this.put_u16_be(question.qclass as u16);
         }
         for answer in item.answer {
-           self.encode_rr(&answer, buf)?;
+           self.encode_rr(&answer, &mut this)?;
         }
         for authority in item.authority {
-            self.encode_rr(&authority, buf)?;
+            self.encode_rr(&authority, &mut this)?;
         }
         for additional in item.additional {
-            self.encode_rr(&additional, buf)?;
+            self.encode_rr(&additional, &mut this)?;
         }
 
         if self.tcp {
-            let mut newbuf = BytesMut::new();
-            newbuf.put_u16_be(buf.len() as u16);
-            newbuf.extend_from_slice(&buf[..]);
-            std::mem::swap(&mut newbuf, buf);
-        } else if buf.len() > 512 {
+            buf.put_u16_be(this.len() as u16);
+        } else if this.len() > 512 {
             debug!("Buffer length {} exceeds 512, truncating", buf.len());
-            buf[2] |= 0b10;
-            buf.truncate(512);
+            this[2] |= 0b10;
+            this.truncate(512);
         } else {
-            buf[2] &= 0b11111101;
+            this[2] &= 0b11111101;
         }
+        buf.extend(this);
 
         Ok(())
     }
@@ -466,7 +466,7 @@ mod tests {
         let decoded = codec.decode(&mut buf).expect("no error").expect("parse complete");
         assert_eq!(decoded.header.id, 12345);
         assert_eq!(decoded.header.query, true);
-        assert_eq!(decoded.header.truncated, true);
+        assert_eq!(decoded.header.truncated, false); // truncated is overwritten
         assert_eq!(&decoded.question[0].qname.as_ref(), &["ksqsf", "moe"]);
     }
 
@@ -497,7 +497,7 @@ mod tests {
         codec.encode(message, &mut buf).expect("encode");
         let decoded = codec.decode(&mut buf).expect("no error").expect("parse complete");
         assert_eq!(decoded.header.id, 12345);
-        assert_eq!(decoded.header.truncated, true);
+        assert_eq!(decoded.header.truncated, false);
         assert_eq!(&decoded.answer[0].name.as_ref(), &["ksqsf", "moe"]);
         assert_eq!(decoded.answer[0].ttl, 120);
         assert_eq!(decoded.answer[0].data, DnsRRData::A(Ipv4Addr::new(127, 0, 0, 1)));
@@ -505,8 +505,9 @@ mod tests {
 
     #[test]
     fn test_many() {
+        std::env::set_var("RUST_LOG", "trace");
         let mut buf = BytesMut::with_capacity(4096);
-        let mut codec = DnsMessageCodec::new(false);
+        let mut codec = DnsMessageCodec::new(true);
         let message = DnsMessage {
             header: DnsHeader {
                 id: 12345,
@@ -531,10 +532,7 @@ mod tests {
             codec.encode(message.clone(), &mut buf).expect("encode");
         }
         for _ in 0..16 {
-            match codec.decode(&mut buf) {
-                Ok(Some(_)) => (),
-                _ => unreachable!()
-            }
+            codec.decode(&mut buf).expect("decode");
         }
         match codec.decode(&mut buf) {
             Ok(Some(_)) => unreachable!(),
