@@ -36,7 +36,8 @@ fn main() {
     };
     debug!("Using config: {:#?}", config);
     let dns_addr = config.dns_addr;
-    let local_entries = config.local;
+    let local_entries_udp = config.local;
+    let local_entries_tcp = local_entries_udp.clone();
 
     let udp_sock = UdpSocket::bind(&"0.0.0.0:53".parse().unwrap()).unwrap();
     let tcp_sock = TcpListener::bind(&"0.0.0.0:53".parse().unwrap()).unwrap();
@@ -61,7 +62,7 @@ fn main() {
                 debug!("Message is {:#?}", message);
 
                 // Filter out questions of type A which have local entries
-                let answers_local = filter_questions(&mut message.question, &local_entries);
+                let answers_local = filter_questions(&mut message.question, &local_entries_udp);
                 debug!("After filtration: {:#?}", message);
 
                 // If no question raised, the server won't reply, let's construct a reply
@@ -89,6 +90,7 @@ fn main() {
         }).map_err(|e| error!("error in udp dispatcher: {:?}", e));
 
     let tcp_dispatcher = tcp_sock.incoming().for_each(move |stream| {
+        let local_entries = local_entries_tcp.clone();
         let client_addr = stream.peer_addr().expect("peer_addr");
         let (sink, stream) = DnsMessageCodec::new(true).framed(stream).split();
 
@@ -96,23 +98,42 @@ fn main() {
             .inspect(move |message| info!("Message {:x} from {} is TCP query",
                                           message.header.id, client_addr))
             .map_err(|e| error!("error in tcp stream {}", e))
-            .fold(sink, move |sink, message| {
+            .fold(sink, move |sink, mut message| {
+                let local_entries = local_entries.clone();
+
                 // Connect to DNS server
                 TcpStream::connect(&dns_addr)
                     .map(|conn| DnsMessageCodec::new(true).framed(conn))
                     .map_err(|e| error!("error in tcp request {}", e))
                 // Send query to DNS server
-                    .map(|codec| codec.send(message).map_err(|e| error!("error sending tcp {}", e)))
+                    .map(move |codec| {
+                        let id = message.header.id;
+                        let local_answers = filter_questions(&mut message.question, &local_entries);
+                        if message.question.len() > 0 {
+                            Either::A(codec.send(message).map_err(|e| error!("error sending tcp {}", e))
+                                      .map(move |codec| (id, codec, local_answers, true)))
+                        } else {
+                            Either::B(future::ok((id, codec, local_answers, false)))
+                        }
+                    })
                     .flatten()
                 // Get response
-                    .map(|codec| codec.into_future().map_err(|_| error!("error into fut"))
-                         .timeout(Duration::from_secs(2)).map_err(|_| error!("request timeout")))
+                    .map(|(id, codec, local_answers, requested)| {
+                        if requested {
+                            Either::A(codec.into_future().map_err(|e| error!("error into fut {:?}", e))
+                                      .timeout(Duration::from_secs(2)).map_err(|_| error!("tcp timeout"))
+                                      .map(move |(resp, _codec)| (resp, local_answers)))
+                        } else {
+                            Either::B(future::ok((Some(from_answer(id, &local_answers)), vec![])))
+                        }
+                    })
                     .flatten()
                     .then(|result| {
                         match result {
-                            Ok((Some(response), _codec)) => {
+                            Ok((Some(mut response), local_answers)) => {
                                 info!("Message {:x} is TCP response", response.header.id);
                                 debug!("Response is {:#?}", response);
+                                response.answer.extend(local_answers);
                                 Ok(response)
                             }
                             _ => {

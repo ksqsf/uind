@@ -15,7 +15,7 @@ macro_rules! or_continue {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct DnsMessageCodec {
     tcp: bool,
     len: Option<usize>, // only for tcp
