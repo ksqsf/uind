@@ -309,6 +309,7 @@ impl Encoder for DnsMessageCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: DnsMessage, buf: &mut BytesMut) -> Result<(), <Self as Encoder>::Error> {
+        buf.reserve(4096);
         self.encode_header(&item, buf)?;
         for question in item.question {
             self.encode_name(&question.qname, buf)?;
@@ -331,8 +332,11 @@ impl Encoder for DnsMessageCodec {
             newbuf.extend_from_slice(&buf[..]);
             std::mem::swap(&mut newbuf, buf);
         } else if buf.len() > 512 {
-            buf[3] |= 0b10;
+            debug!("Buffer length {} exceeds 512, truncating", buf.len());
+            buf[2] |= 0b10;
             buf.truncate(512);
+        } else {
+            buf[2] &= 0b11111101;
         }
 
         Ok(())
