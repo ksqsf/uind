@@ -86,7 +86,7 @@ pub struct DnsResourceRecord {
     pub rtype: DnsType,
     pub rclass: DnsClass,
     pub ttl: u32,
-    pub data: DnsRRData
+    pub data: DnsRRData,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -150,7 +150,7 @@ impl DnsType {
             253 => Some(DnsType::MAILB),
             254 => Some(DnsType::MAILA),
             255 => Some(DnsType::Any),
-            _ => None
+            _ => None,
         }
     }
 }
